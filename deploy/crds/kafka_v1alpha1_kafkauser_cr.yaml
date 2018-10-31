@@ -1,0 +1,7 @@
+apiVersion: kafka.lrolaz.io/v1alpha1
+kind: KafkaUser
+metadata:
+  name: example-kafkauser
+spec:
+  # Add fields here
+  size: 3

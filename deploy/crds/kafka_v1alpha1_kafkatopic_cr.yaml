@@ -1,0 +1,7 @@
+apiVersion: kafka.lrolaz.io/v1alpha1
+kind: KafkaTopic
+metadata:
+  name: example-kafkatopic
+spec:
+  # Add fields here
+  size: 3
