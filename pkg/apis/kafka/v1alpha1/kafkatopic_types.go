@@ -10,7 +10,11 @@ import (
 // KafkaTopicSpec defines the desired state of KafkaTopic
 type KafkaTopicSpec struct {
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
-	// Important: Run "operator-sdk generate k8s" to regenerate code after modifying this file
+	// Important: Run "operator-sdk generate k8s" to regenerate code after modifying this file		
+    TopicName     string             `json:"topicName"`
+	Partitions    int                `json:"partitions,omitempty"`
+    Replicas      int                `json:"replicas,omitempty"`
+    Config        map[string]string  `json:"config,omitempty"`
 }
 
 // KafkaTopicStatus defines the observed state of KafkaTopic

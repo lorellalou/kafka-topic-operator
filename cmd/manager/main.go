@@ -15,6 +15,17 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/runtime/signals"
 )
 
+var (
+	keyName      = flag.String("key-name", "sealed-secrets-key", "Name of Secret containing public/private key.")
+	keySize      = flag.Int("key-size", 4096, "Size of encryption key.")
+	validFor     = flag.Duration("key-ttl", 10*365*24*time.Hour, "Duration that certificate is valid for.")
+	myCN         = flag.String("my-cn", "", "CN to use in generated certificate.")
+	printVersion = flag.Bool("version", false, "Print version information and exit")
+
+	// VERSION set from Makefile
+	VERSION = "UNKNOWN"
+)
+
 func printVersion() {
 	log.Printf("Go Version: %s", runtime.Version())
 	log.Printf("Go OS/Arch: %s/%s", runtime.GOOS, runtime.GOARCH)
@@ -23,12 +34,9 @@ func printVersion() {
 
 func main() {
 	printVersion()
+	
+	
 	flag.Parse()
-
-	namespace, err := k8sutil.GetWatchNamespace()
-	if err != nil {
-		log.Fatalf("failed to get watch namespace: %v", err)
-	}
 
 	// TODO: Expose metrics port after SDK uses controller-runtime's dynamic client
 	// sdk.ExposeMetricsPort()
@@ -40,7 +48,7 @@ func main() {
 	}
 
 	// Create a new Cmd to provide shared dependencies and start components
-	mgr, err := manager.New(cfg, manager.Options{Namespace: namespace})
+	mgr, err := manager.New(cfg, manager.Options{Namespace: ""})
 	if err != nil {
 		log.Fatal(err)
 	}

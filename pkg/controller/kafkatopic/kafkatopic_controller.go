@@ -17,6 +17,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
+	
+	sarama "github.com/Shopify/sarama"
 )
 
 /**
@@ -49,16 +51,6 @@ func add(mgr manager.Manager, r reconcile.Reconciler) error {
 		return err
 	}
 
-	// TODO(user): Modify this to be the types you create that are owned by the primary resource
-	// Watch for changes to secondary resource Pods and requeue the owner KafkaTopic
-	err = c.Watch(&source.Kind{Type: &corev1.Pod{}}, &handler.EnqueueRequestForOwner{
-		IsController: true,
-		OwnerType:    &kafkav1alpha1.KafkaTopic{},
-	})
-	if err != nil {
-		return err
-	}
-
 	return nil
 }
 
@@ -70,6 +62,7 @@ type ReconcileKafkaTopic struct {
 	// that reads objects from the cache and writes to the apiserver
 	client client.Client
 	scheme *runtime.Scheme
+	kafka sarama.ClusterAdmin
 }
 
 // Reconcile reads that state of the cluster for a KafkaTopic object and makes changes based on the state read
@@ -96,54 +89,31 @@ func (r *ReconcileKafkaTopic) Reconcile(request reconcile.Request) (reconcile.Re
 		return reconcile.Result{}, err
 	}
 
-	// Define a new Pod object
-	pod := newPodForCR(instance)
-
-	// Set KafkaTopic instance as the owner and controller
-	if err := controllerutil.SetControllerReference(instance, pod, r.scheme); err != nil {
+	// Check if this Topic already exists
+	resource := sarama.ConfigResource{Name: "r1", Type: TopicResource, ConfigNames: []string{instance.Spec.TopicName}}
+	entries, err := r.kafka.DescribeConfig(resource)
+	if err != nil {
 		return reconcile.Result{}, err
 	}
 
-	// Check if this Pod already exists
-	found := &corev1.Pod{}
-	err = r.client.Get(context.TODO(), types.NamespacedName{Name: pod.Name, Namespace: pod.Namespace}, found)
-	if err != nil && errors.IsNotFound(err) {
-		log.Printf("Creating a new Pod %s/%s\n", pod.Namespace, pod.Name)
-		err = r.client.Create(context.TODO(), pod)
+	if len(entries) <= 0 {
+		log.Printf("Creating a new Topic %s/%s\n", request.Namespace, request.Name)
+		err = r.kafka.CreateTopic(instance.Spec.TopicName, 
+			&sarama.TopicDetail{
+				NumPartitions: instance.Spec.Partitions, 
+				ReplicationFactor: instance.Spec.Replicas,
+				ConfigEntries: instance.Spec.Config,
+			}, false)
 		if err != nil {
 			return reconcile.Result{}, err
 		}
 
-		// Pod created successfully - don't requeue
+		// Topic created successfully - don't requeue
 		return reconcile.Result{}, nil
-	} else if err != nil {
-		return reconcile.Result{}, err
+	} else {
+		log.Printf("Updating new Topic %s/%s\n", request.Namespace, request.Name)
+		// Todo	
+		return reconcile.Result{}, nil
 	}
 
-	// Pod already exists - don't requeue
-	log.Printf("Skip reconcile: Pod %s/%s already exists", found.Namespace, found.Name)
-	return reconcile.Result{}, nil
-}
-
-// newPodForCR returns a busybox pod with the same name/namespace as the cr
-func newPodForCR(cr *kafkav1alpha1.KafkaTopic) *corev1.Pod {
-	labels := map[string]string{
-		"app": cr.Name,
-	}
-	return &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      cr.Name + "-pod",
-			Namespace: cr.Namespace,
-			Labels:    labels,
-		},
-		Spec: corev1.PodSpec{
-			Containers: []corev1.Container{
-				{
-					Name:    "busybox",
-					Image:   "busybox",
-					Command: []string{"sleep", "3600"},
-				},
-			},
-		},
-	}
 }

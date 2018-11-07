@@ -16,7 +16,7 @@ spec:
       containers:
         - name: kafka-topic-operator
           # Replace this with the built image name
-          image: REPLACE_IMAGE
+          image: eu.gcr.io/kube-kafka-labo/kafka-topic-operator
           ports:
           - containerPort: 60000
             name: metrics
