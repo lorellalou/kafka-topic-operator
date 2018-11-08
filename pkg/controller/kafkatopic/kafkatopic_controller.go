@@ -3,16 +3,17 @@ package kafkatopic
 import (
 	"context"
 	"log"
+	"strings"
+	"os"
+	"crypto/tls"
+	"crypto/x509"	
+	
 
 	kafkav1alpha1 "github.com/lrolaz/kafka-topic-operator/pkg/apis/kafka/v1alpha1"
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -29,12 +30,27 @@ import (
 // Add creates a new KafkaTopic Controller and adds it to the Manager. The Manager will set fields on the Controller
 // and Start it when the Manager is Started.
 func Add(mgr manager.Manager) error {
-	return add(mgr, newReconciler(mgr))
+	config := sarama.NewConfig()
+	config.Version = sarama.V2_0_0_0
+	config.Net.TLS.Enable = true
+	brokers := strings.Split(os.Getenv("KAFKA_BOOTSTRAP_SERVERS"), ",")
+	log.Printf("Kafka Broker %s\n", os.Getenv("KAFKA_BOOTSTRAP_SERVERS"))
+	kafka, err := sarama.NewClusterAdmin(brokers, config)	
+	if err != nil {
+		return err
+	}	
+	
+	return add(mgr, newReconciler(mgr, kafka))
 }
 
 // newReconciler returns a new reconcile.Reconciler
-func newReconciler(mgr manager.Manager) reconcile.Reconciler {
-	return &ReconcileKafkaTopic{client: mgr.GetClient(), scheme: mgr.GetScheme()}
+func newReconciler(mgr manager.Manager, kafka sarama.ClusterAdmin) reconcile.Reconciler {
+
+	return &ReconcileKafkaTopic{
+		client: mgr.GetClient(), 
+		scheme: mgr.GetScheme(),
+		kafka: kafka,
+	}
 }
 
 // add adds a new Controller to mgr with r as the reconcile.Reconciler
@@ -90,7 +106,7 @@ func (r *ReconcileKafkaTopic) Reconcile(request reconcile.Request) (reconcile.Re
 	}
 
 	// Check if this Topic already exists
-	resource := sarama.ConfigResource{Name: "r1", Type: TopicResource, ConfigNames: []string{instance.Spec.TopicName}}
+	resource := sarama.ConfigResource{Name: "r1", Type: sarama.TopicResource, ConfigNames: []string{instance.Spec.TopicName}}
 	entries, err := r.kafka.DescribeConfig(resource)
 	if err != nil {
 		return reconcile.Result{}, err
@@ -115,5 +131,31 @@ func (r *ReconcileKafkaTopic) Reconcile(request reconcile.Request) (reconcile.Re
 		// Todo	
 		return reconcile.Result{}, nil
 	}
+
+func createTlsConfiguration() (t *tls.Config, error) {
+	if *certFile != "" && *keyFile != "" && *caFile != "" {
+		cert, err := tls.LoadX509KeyPair(*certFile, *keyFile)
+		if err != nil {
+			return nil, err
+		}
+
+		caCert, err := ioutil.ReadFile(*caFile)
+		if err != nil {
+			return nil, err
+		}
+
+		caCertPool := x509.NewCertPool()
+		caCertPool.AppendCertsFromPEM(caCert)
+
+		t = &tls.Config{
+			Certificates:       []tls.Certificate{cert},
+			RootCAs:            caCertPool,
+			InsecureSkipVerify: *verifySsl,
+		}
+	}
+	// will be nil by default if nothing is provided
+	return t, nil
+}
+
 
 }

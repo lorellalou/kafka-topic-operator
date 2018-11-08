@@ -4,26 +4,18 @@ import (
 	"flag"
 	"log"
 	"runtime"
+	"os"
+
 
 	"github.com/lrolaz/kafka-topic-operator/pkg/apis"
 	"github.com/lrolaz/kafka-topic-operator/pkg/controller"
-	"github.com/operator-framework/operator-sdk/pkg/k8sutil"
 	sdkVersion "github.com/operator-framework/operator-sdk/version"
 	_ "k8s.io/client-go/plugin/pkg/client/auth/gcp"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/runtime/signals"
-)
-
-var (
-	keyName      = flag.String("key-name", "sealed-secrets-key", "Name of Secret containing public/private key.")
-	keySize      = flag.Int("key-size", 4096, "Size of encryption key.")
-	validFor     = flag.Duration("key-ttl", 10*365*24*time.Hour, "Duration that certificate is valid for.")
-	myCN         = flag.String("my-cn", "", "CN to use in generated certificate.")
-	printVersion = flag.Bool("version", false, "Print version information and exit")
-
-	// VERSION set from Makefile
-	VERSION = "UNKNOWN"
+	
+	sarama "github.com/Shopify/sarama"	
 )
 
 func printVersion() {
@@ -40,6 +32,8 @@ func main() {
 
 	// TODO: Expose metrics port after SDK uses controller-runtime's dynamic client
 	// sdk.ExposeMetricsPort()
+
+	sarama.Logger = log.New(os.Stdout, "[Sarama] ", log.LstdFlags)
 
 	// Get a config to talk to the apiserver
 	cfg, err := config.GetConfig()
