@@ -40,8 +40,13 @@ func Add(mgr manager.Manager) error {
 	caFile := os.Getenv("OPERATOR_TLS_CA_FILE")
 	tlsConfig, err := createTlsConfiguration(certFile, keyFile, caFile)
 	if err != nil {
+		return err
+	}
+	if tlsConfig != nil {
 		config.Net.TLS.Enable = true
 		config.Net.TLS.Config = tlsConfig
+	} else {
+		log.Printf("No TLS config\n")
 	}
 	
 	kafka, err := sarama.NewClusterAdmin(brokers, config)	
@@ -145,11 +150,13 @@ func (r *ReconcileKafkaTopic) Reconcile(request reconcile.Request) (reconcile.Re
 
 func createTlsConfiguration(certFile string, keyFile string, caFile string) (t *tls.Config, err error) {
 	if certFile != "" && keyFile != "" && caFile != "" {
+		log.Printf("Loading TLS Key Pair %s %s\n", certFile, keyFile)
 		cert, err := tls.LoadX509KeyPair(certFile, keyFile)
 		if err != nil {
 			return nil, err
 		}
 
+		log.Printf("Loading TLS CA %s\n", caFile)
 		caCert, err := ioutil.ReadFile(caFile)
 		if err != nil {
 			return nil, err
@@ -162,6 +169,9 @@ func createTlsConfiguration(certFile string, keyFile string, caFile string) (t *
 			Certificates:       []tls.Certificate{cert},
 			RootCAs:            caCertPool,
 			CipherSuites:       []uint16{tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384},
+			InsecureSkipVerify:	true,
+			ClientAuth:			tls.RequireAndVerifyClientCert,
+			
 		}
 	}
 	// will be nil by default if nothing is provided
