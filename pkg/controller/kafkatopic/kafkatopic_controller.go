@@ -7,6 +7,7 @@ import (
 	"os"
 	"crypto/tls"
 	"crypto/x509"	
+	"io/ioutil"
 	
 
 	kafkav1alpha1 "github.com/lrolaz/kafka-topic-operator/pkg/apis/kafka/v1alpha1"
@@ -32,24 +33,33 @@ import (
 func Add(mgr manager.Manager) error {
 	config := sarama.NewConfig()
 	config.Version = sarama.V2_0_0_0
-	config.Net.TLS.Enable = true
 	brokers := strings.Split(os.Getenv("KAFKA_BOOTSTRAP_SERVERS"), ",")
-	log.Printf("Kafka Broker %s\n", os.Getenv("KAFKA_BOOTSTRAP_SERVERS"))
+	log.Printf("Kafka Broker %s\n", strings.Join(brokers, ","))
+	certFile := os.Getenv("OPERATOR_TLS_CERT_FILE")
+	keyFile := os.Getenv("OPERATOR_TLS_KEY_FILE")
+	caFile := os.Getenv("OPERATOR_TLS_CA_FILE")
+	tlsConfig, err := createTlsConfiguration(certFile, keyFile, caFile)
+	if err != nil {
+		config.Net.TLS.Enable = true
+		config.Net.TLS.Config = tlsConfig
+	}
+	
 	kafka, err := sarama.NewClusterAdmin(brokers, config)	
 	if err != nil {
 		return err
 	}	
 	
-	return add(mgr, newReconciler(mgr, kafka))
+	log.Printf("Kafka Broker connected !\n")
+	return add(mgr, newReconciler(mgr, &kafka))
 }
 
 // newReconciler returns a new reconcile.Reconciler
-func newReconciler(mgr manager.Manager, kafka sarama.ClusterAdmin) reconcile.Reconciler {
+func newReconciler(mgr manager.Manager, kafka *sarama.ClusterAdmin) reconcile.Reconciler {
 
 	return &ReconcileKafkaTopic{
 		client: mgr.GetClient(), 
 		scheme: mgr.GetScheme(),
-		kafka: kafka,
+		kafka: *kafka,
 	}
 }
 
@@ -131,15 +141,16 @@ func (r *ReconcileKafkaTopic) Reconcile(request reconcile.Request) (reconcile.Re
 		// Todo	
 		return reconcile.Result{}, nil
 	}
+}
 
-func createTlsConfiguration() (t *tls.Config, error) {
-	if *certFile != "" && *keyFile != "" && *caFile != "" {
-		cert, err := tls.LoadX509KeyPair(*certFile, *keyFile)
+func createTlsConfiguration(certFile string, keyFile string, caFile string) (t *tls.Config, err error) {
+	if certFile != "" && keyFile != "" && caFile != "" {
+		cert, err := tls.LoadX509KeyPair(certFile, keyFile)
 		if err != nil {
 			return nil, err
 		}
 
-		caCert, err := ioutil.ReadFile(*caFile)
+		caCert, err := ioutil.ReadFile(caFile)
 		if err != nil {
 			return nil, err
 		}
@@ -150,12 +161,9 @@ func createTlsConfiguration() (t *tls.Config, error) {
 		t = &tls.Config{
 			Certificates:       []tls.Certificate{cert},
 			RootCAs:            caCertPool,
-			InsecureSkipVerify: *verifySsl,
+			CipherSuites:       []uint16{tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384},
 		}
 	}
 	// will be nil by default if nothing is provided
 	return t, nil
-}
-
-
 }
