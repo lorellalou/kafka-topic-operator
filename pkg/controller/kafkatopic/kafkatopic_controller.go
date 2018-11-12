@@ -129,11 +129,16 @@ func (r *ReconcileKafkaTopic) Reconcile(request reconcile.Request) (reconcile.Re
 
 	if len(entries) <= 0 {
 		log.Printf("Creating a new Topic %s/%s\n", request.Namespace, request.Name)
+		var config map[string]*string
+		// loop over config
+		for key, value := range instance.Spec.Config {
+			config[key] = &value
+		}		
 		err = r.kafka.CreateTopic(instance.Spec.TopicName, 
 			&sarama.TopicDetail{
 				NumPartitions: instance.Spec.Partitions, 
 				ReplicationFactor: instance.Spec.Replicas,
-				ConfigEntries: instance.Spec.Config,
+				ConfigEntries: config,
 			}, false)
 		if err != nil {
 			return reconcile.Result{}, err
@@ -161,9 +166,14 @@ func createTlsConfiguration(certFile string, keyFile string, caFile string) (t *
 		if err != nil {
 			return nil, err
 		}
+		intermediateCert, err := ioutil.ReadFile(certFile)
+		if err != nil {
+			return nil, err
+		}
 
 		caCertPool := x509.NewCertPool()
 		caCertPool.AppendCertsFromPEM(caCert)
+		caCertPool.AppendCertsFromPEM(intermediateCert)
 
 		t = &tls.Config{
 			Certificates:       []tls.Certificate{cert},
