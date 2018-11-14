@@ -3,6 +3,7 @@ package kafkauser
 import (
 	"context"
 	"log"
+	"time"
 
 	kafkav1alpha1 "github.com/lrolaz/kafka-topic-operator/pkg/apis/kafka/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
@@ -83,7 +84,7 @@ func (r *ReconcileKafkaUser) Reconcile(request reconcile.Request) (reconcile.Res
 			return reconcile.Result{}, nil
 		}
 		// Error reading the object - requeue the request.
-		return reconcile.Result{}, err
+		return reconcile.Result{Requeue: true, RequeueAfter: time.Duration(30)}, err
 	}
 
 	// Define a new Pod object

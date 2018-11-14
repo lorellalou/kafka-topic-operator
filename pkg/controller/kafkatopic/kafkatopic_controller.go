@@ -8,7 +8,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"	
 	"io/ioutil"
-	
+	"time"
 
 	kafkav1alpha1 "github.com/lrolaz/kafka-topic-operator/pkg/apis/kafka/v1alpha1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -129,7 +129,7 @@ func (r *ReconcileKafkaTopic) Reconcile(request reconcile.Request) (reconcile.Re
 
 	if len(entries) <= 0 {
 		log.Printf("Creating a new Topic %s/%s\n", request.Namespace, request.Name)
-		var config map[string]*string
+		var config map[string]*string = make(map[string]*string)
 		// loop over config
 		for key, value := range instance.Spec.Config {
 			config[key] = &value
@@ -141,7 +141,7 @@ func (r *ReconcileKafkaTopic) Reconcile(request reconcile.Request) (reconcile.Re
 				ConfigEntries: config,
 			}, false)
 		if err != nil {
-			return reconcile.Result{}, err
+			return reconcile.Result{Requeue: true, RequeueAfter: time.Duration(30)}, err
 		}
 
 		// Topic created successfully - don't requeue
