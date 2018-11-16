@@ -11,6 +11,7 @@ import (
 	"time"
 
 	kafkav1alpha1 "github.com/lrolaz/kafka-topic-operator/pkg/apis/kafka/v1alpha1"
+	kafka "github.com/lrolaz/kafka-topic-operator/pkg/kafka"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -31,40 +32,21 @@ import (
 // Add creates a new KafkaTopic Controller and adds it to the Manager. The Manager will set fields on the Controller
 // and Start it when the Manager is Started.
 func Add(mgr manager.Manager) error {
-	config := sarama.NewConfig()
-	config.Version = sarama.V2_0_0_0
-	brokers := strings.Split(os.Getenv("KAFKA_BOOTSTRAP_SERVERS"), ",")
-	log.Printf("Kafka Broker %s\n", strings.Join(brokers, ","))
-	certFile := os.Getenv("OPERATOR_TLS_CERT_FILE")
-	keyFile := os.Getenv("OPERATOR_TLS_KEY_FILE")
-	caFile := os.Getenv("OPERATOR_TLS_CA_FILE")
-	tlsConfig, err := createTlsConfiguration(certFile, keyFile, caFile)
+	kafka, err := kafka.New()
 	if err != nil {
 		return err
 	}
-	if tlsConfig != nil {
-		config.Net.TLS.Enable = true
-		config.Net.TLS.Config = tlsConfig
-	} else {
-		log.Printf("No TLS config\n")
-	}
-	
-	kafka, err := sarama.NewClusterAdmin(brokers, config)	
-	if err != nil {
-		return err
-	}	
-	
 	log.Printf("Kafka Broker connected !\n")
-	return add(mgr, newReconciler(mgr, &kafka))
+	return add(mgr, newReconciler(mgr, kafka))
 }
 
 // newReconciler returns a new reconcile.Reconciler
-func newReconciler(mgr manager.Manager, kafka *sarama.ClusterAdmin) reconcile.Reconciler {
+func newReconciler(mgr manager.Manager, kafka kafka.KafkaUtil) reconcile.Reconciler {
 
 	return &ReconcileKafkaTopic{
 		client: mgr.GetClient(), 
 		scheme: mgr.GetScheme(),
-		kafka: *kafka,
+		kafka: kafka,
 	}
 }
 
@@ -93,7 +75,7 @@ type ReconcileKafkaTopic struct {
 	// that reads objects from the cache and writes to the apiserver
 	client client.Client
 	scheme *runtime.Scheme
-	kafka sarama.ClusterAdmin
+	kafka kafka.KafkaUtil
 }
 
 // Reconcile reads that state of the cluster for a KafkaTopic object and makes changes based on the state read
@@ -114,6 +96,7 @@ func (r *ReconcileKafkaTopic) Reconcile(request reconcile.Request) (reconcile.Re
 			// Request object not found, could have been deleted after reconcile request.
 			// Owned objects are automatically garbage collected. For additional cleanup logic use finalizers.
 			// Return and don't requeue
+			log.Printf("KafkaTopic %s/%s deleted but the topic is kept on Brokers\n", request.Namespace, request.Name)	
 			return reconcile.Result{}, nil
 		}
 		// Error reading the object - requeue the request.
@@ -121,19 +104,21 @@ func (r *ReconcileKafkaTopic) Reconcile(request reconcile.Request) (reconcile.Re
 	}
 
 	// Check if this Topic already exists
-	resource := sarama.ConfigResource{Name: "r1", Type: sarama.TopicResource, ConfigNames: []string{instance.Spec.TopicName}}
+	resource := sarama.ConfigResource{Name: instance.Spec.TopicName, Type: sarama.TopicResource, ConfigNames: []string{}}
 	entries, err := r.kafka.DescribeConfig(resource)
 	if err != nil {
 		return reconcile.Result{}, err
 	}
 
+	config := make(map[string]*string)
+	// loop over config
+	for key, value := range instance.Spec.Config {
+		v := value
+		config[key] = &v
+	}	
+
 	if len(entries) <= 0 {
-		log.Printf("Creating a new Topic %s/%s\n", request.Namespace, request.Name)
-		var config map[string]*string = make(map[string]*string)
-		// loop over config
-		for key, value := range instance.Spec.Config {
-			config[key] = &value
-		}		
+		log.Printf("Creating a new Topic %s/%s\n", request.Namespace, instance.Spec.TopicName)	
 		err = r.kafka.CreateTopic(instance.Spec.TopicName, 
 			&sarama.TopicDetail{
 				NumPartitions: instance.Spec.Partitions, 
@@ -141,49 +126,21 @@ func (r *ReconcileKafkaTopic) Reconcile(request reconcile.Request) (reconcile.Re
 				ConfigEntries: config,
 			}, false)
 		if err != nil {
+			log.Printf("%s\n", err)
 			return reconcile.Result{Requeue: true, RequeueAfter: time.Duration(30)}, err
 		}
 
-		// Topic created successfully - don't requeue
+		log.Printf("Topic %s/%s created successfully", request.Namespace, instance.Spec.TopicName)
 		return reconcile.Result{}, nil
 	} else {
-		log.Printf("Updating new Topic %s/%s\n", request.Namespace, request.Name)
-		// Todo	
+		log.Printf("Updating Topic %s/%s\n", request.Namespace, instance.Spec.TopicName)
+		err = r.kafka.AlterConfig(sarama.TopicResource, instance.Spec.TopicName, config, false)
+		if err != nil {
+			log.Printf("%s\n", err)
+			return reconcile.Result{Requeue: true, RequeueAfter: time.Duration(30)}, err
+		}
+		log.Printf("Topic %s/%s updated successfully", request.Namespace, instance.Spec.TopicName)
 		return reconcile.Result{}, nil
 	}
 }
 
-func createTlsConfiguration(certFile string, keyFile string, caFile string) (t *tls.Config, err error) {
-	if certFile != "" && keyFile != "" && caFile != "" {
-		log.Printf("Loading TLS Key Pair %s %s\n", certFile, keyFile)
-		cert, err := tls.LoadX509KeyPair(certFile, keyFile)
-		if err != nil {
-			return nil, err
-		}
-
-		log.Printf("Loading TLS CA %s\n", caFile)
-		caCert, err := ioutil.ReadFile(caFile)
-		if err != nil {
-			return nil, err
-		}
-		intermediateCert, err := ioutil.ReadFile(certFile)
-		if err != nil {
-			return nil, err
-		}
-
-		caCertPool := x509.NewCertPool()
-		caCertPool.AppendCertsFromPEM(caCert)
-		caCertPool.AppendCertsFromPEM(intermediateCert)
-
-		t = &tls.Config{
-			Certificates:       []tls.Certificate{cert},
-			RootCAs:            caCertPool,
-			CipherSuites:       []uint16{tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384},
-			InsecureSkipVerify:	true,
-			ClientAuth:			tls.RequireAndVerifyClientCert,
-			
-		}
-	}
-	// will be nil by default if nothing is provided
-	return t, nil
-}
