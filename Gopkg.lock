@@ -248,6 +248,20 @@
   version = "v0.3.6"
 
 [[projects]]
+  digest = "1:002fe13997338f63571dae128b8bd158a7544c65f110299559eed7dcc92bef36"
+  name = "github.com/jetstack/cert-manager"
+  packages = [
+    "pkg/apis/certmanager",
+    "pkg/apis/certmanager/v1alpha1",
+    "pkg/client/clientset/versioned",
+    "pkg/client/clientset/versioned/scheme",
+    "pkg/client/clientset/versioned/typed/certmanager/v1alpha1",
+  ]
+  pruneopts = "NT"
+  revision = "9e8c3ad899c5aafaa360ca947eac7f5ba6301035"
+  version = "v0.5.2"
+
+[[projects]]
   digest = "1:1d39c063244ad17c4b18e8da1551163b6ffb52bd1640a49a8ec5c3b7bf4dbd5d"
   name = "github.com/json-iterator/go"
   packages = ["."]
@@ -295,10 +309,7 @@
   branch = "master"
   digest = "1:4913a20ef445acf2e9897727206ce9767f04ed5a5b1389e6ad2a9fc22983d4cf"
   name = "github.com/operator-framework/operator-sdk"
-  packages = [
-    "pkg/k8sutil",
-    "version",
-  ]
+  packages = ["version"]
   pruneopts = "NT"
   revision = "ab09a3d17d9b0fb24583639721bc5694dc5c1cfa"
 
@@ -747,7 +758,6 @@
     "pkg/client/apiutil",
     "pkg/client/config",
     "pkg/controller",
-    "pkg/controller/controllerutil",
     "pkg/event",
     "pkg/handler",
     "pkg/internal/controller",
@@ -777,14 +787,13 @@
   analyzer-version = 1
   input-imports = [
     "github.com/Shopify/sarama",
-    "github.com/operator-framework/operator-sdk/pkg/k8sutil",
+    "github.com/jetstack/cert-manager/pkg/apis/certmanager/v1alpha1",
+    "github.com/jetstack/cert-manager/pkg/client/clientset/versioned",
     "github.com/operator-framework/operator-sdk/version",
-    "k8s.io/api/core/v1",
     "k8s.io/apimachinery/pkg/api/errors",
     "k8s.io/apimachinery/pkg/apis/meta/v1",
     "k8s.io/apimachinery/pkg/runtime",
     "k8s.io/apimachinery/pkg/runtime/schema",
-    "k8s.io/apimachinery/pkg/types",
     "k8s.io/client-go/plugin/pkg/client/auth/gcp",
     "k8s.io/code-generator/cmd/client-gen",
     "k8s.io/code-generator/cmd/conversion-gen",
@@ -797,7 +806,6 @@
     "sigs.k8s.io/controller-runtime/pkg/client",
     "sigs.k8s.io/controller-runtime/pkg/client/config",
     "sigs.k8s.io/controller-runtime/pkg/controller",
-    "sigs.k8s.io/controller-runtime/pkg/controller/controllerutil",
     "sigs.k8s.io/controller-runtime/pkg/handler",
     "sigs.k8s.io/controller-runtime/pkg/manager",
     "sigs.k8s.io/controller-runtime/pkg/reconcile",

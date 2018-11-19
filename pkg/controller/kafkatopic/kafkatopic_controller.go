@@ -3,11 +3,6 @@ package kafkatopic
 import (
 	"context"
 	"log"
-	"strings"
-	"os"
-	"crypto/tls"
-	"crypto/x509"	
-	"io/ioutil"
 	"time"
 
 	kafkav1alpha1 "github.com/lrolaz/kafka-topic-operator/pkg/apis/kafka/v1alpha1"
@@ -36,17 +31,17 @@ func Add(mgr manager.Manager) error {
 	if err != nil {
 		return err
 	}
-	log.Printf("Kafka Broker connected !\n")
+	log.Printf("Kafka Broker connected\n")	
 	return add(mgr, newReconciler(mgr, kafka))
 }
 
 // newReconciler returns a new reconcile.Reconciler
-func newReconciler(mgr manager.Manager, kafka kafka.KafkaUtil) reconcile.Reconciler {
-
+func newReconciler(mgr manager.Manager, kafka *kafka.KafkaUtil) reconcile.Reconciler {
 	return &ReconcileKafkaTopic{
 		client: mgr.GetClient(), 
 		scheme: mgr.GetScheme(),
 		kafka: kafka,
+
 	}
 }
 
@@ -75,7 +70,7 @@ type ReconcileKafkaTopic struct {
 	// that reads objects from the cache and writes to the apiserver
 	client client.Client
 	scheme *runtime.Scheme
-	kafka kafka.KafkaUtil
+	kafka *kafka.KafkaUtil
 }
 
 // Reconcile reads that state of the cluster for a KafkaTopic object and makes changes based on the state read
@@ -105,7 +100,7 @@ func (r *ReconcileKafkaTopic) Reconcile(request reconcile.Request) (reconcile.Re
 
 	// Check if this Topic already exists
 	resource := sarama.ConfigResource{Name: instance.Spec.TopicName, Type: sarama.TopicResource, ConfigNames: []string{}}
-	entries, err := r.kafka.DescribeConfig(resource)
+	entries, err := r.kafka.KafkaAdmin.DescribeConfig(resource)
 	if err != nil {
 		return reconcile.Result{}, err
 	}
@@ -119,7 +114,7 @@ func (r *ReconcileKafkaTopic) Reconcile(request reconcile.Request) (reconcile.Re
 
 	if len(entries) <= 0 {
 		log.Printf("Creating a new Topic %s/%s\n", request.Namespace, instance.Spec.TopicName)	
-		err = r.kafka.CreateTopic(instance.Spec.TopicName, 
+		err = r.kafka.KafkaAdmin.CreateTopic(instance.Spec.TopicName, 
 			&sarama.TopicDetail{
 				NumPartitions: instance.Spec.Partitions, 
 				ReplicationFactor: instance.Spec.Replicas,
@@ -134,7 +129,7 @@ func (r *ReconcileKafkaTopic) Reconcile(request reconcile.Request) (reconcile.Re
 		return reconcile.Result{}, nil
 	} else {
 		log.Printf("Updating Topic %s/%s\n", request.Namespace, instance.Spec.TopicName)
-		err = r.kafka.AlterConfig(sarama.TopicResource, instance.Spec.TopicName, config, false)
+		err = r.kafka.KafkaAdmin.AlterConfig(sarama.TopicResource, instance.Spec.TopicName, config, false)
 		if err != nil {
 			log.Printf("%s\n", err)
 			return reconcile.Result{Requeue: true, RequeueAfter: time.Duration(30)}, err

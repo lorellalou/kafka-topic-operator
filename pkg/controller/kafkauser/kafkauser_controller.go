@@ -6,17 +6,20 @@ import (
 	"time"
 
 	kafkav1alpha1 "github.com/lrolaz/kafka-topic-operator/pkg/apis/kafka/v1alpha1"
-	corev1 "k8s.io/api/core/v1"
+	kafka "github.com/lrolaz/kafka-topic-operator/pkg/kafka"
 	"k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
+	
+	sarama "github.com/Shopify/sarama"
+	
+	cmv1alpha1 "github.com/jetstack/cert-manager/pkg/apis/certmanager/v1alpha1"
+	cmclientset "github.com/jetstack/cert-manager/pkg/client/clientset/versioned"	
 )
 
 /**
@@ -27,12 +30,26 @@ import (
 // Add creates a new KafkaUser Controller and adds it to the Manager. The Manager will set fields on the Controller
 // and Start it when the Manager is Started.
 func Add(mgr manager.Manager) error {
-	return add(mgr, newReconciler(mgr))
+	kafka, err := kafka.New()
+	if err != nil {
+		return err
+	}
+	log.Printf("Kafka Broker connected\n")
+	cmClientSet, err := cmclientset.NewForConfig(mgr.GetConfig())
+    if err != nil {
+		return err
+    }	
+	return add(mgr, newReconciler(mgr, kafka, cmClientSet))
 }
 
 // newReconciler returns a new reconcile.Reconciler
-func newReconciler(mgr manager.Manager) reconcile.Reconciler {
-	return &ReconcileKafkaUser{client: mgr.GetClient(), scheme: mgr.GetScheme()}
+func newReconciler(mgr manager.Manager, kafka *kafka.KafkaUtil, cmClientSet *cmclientset.Clientset) reconcile.Reconciler {
+	return &ReconcileKafkaUser{
+		client: mgr.GetClient(), 
+		scheme: mgr.GetScheme(),
+		kafka: kafka,
+		cmClient: cmClientSet,
+	}
 }
 
 // add adds a new Controller to mgr with r as the reconcile.Reconciler
@@ -61,6 +78,8 @@ type ReconcileKafkaUser struct {
 	// that reads objects from the cache and writes to the apiserver
 	client client.Client
 	scheme *runtime.Scheme
+	kafka *kafka.KafkaUtil	
+	cmClient *cmclientset.Clientset	
 }
 
 // Reconcile reads that state of the cluster for a KafkaUser object and makes changes based on the state read
@@ -87,8 +106,12 @@ func (r *ReconcileKafkaUser) Reconcile(request reconcile.Request) (reconcile.Res
 		return reconcile.Result{Requeue: true, RequeueAfter: time.Duration(30)}, err
 	}
 
-	// Define a new Pod object
-	pod := newPodForCR(instance)
+	// Check if this Certificate already exists
+	r.cmClient.CertmanagerV1alpha1().Certificates(request.Namespace).Get(request.Name)
+	entries, err := r.kafka.KafkaAdmin.DescribeConfig(resource)
+	if err != nil {
+		return reconcile.Result{}, err
+	}
 
 	// Set KafkaUser instance as the owner and controller
 	if err := controllerutil.SetControllerReference(instance, pod, r.scheme); err != nil {

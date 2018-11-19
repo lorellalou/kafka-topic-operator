@@ -9,8 +9,23 @@ import (
 
 // KafkaUserSpec defines the desired state of KafkaUser
 type KafkaUserSpec struct {
-	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
-	// Important: Run "operator-sdk generate k8s" to regenerate code after modifying this file
+	Authentication   KafkaUserAuthentication   `json:"authentication"`
+	Authorization    KafkaUserAuthorization    `json:"authorization"`
+}
+
+type KafkaUserAuthentication struct {
+	TLS     		*KafkaUserAuthenticationTLS		`json:"tls"`
+}
+
+type KafkaUserAuthenticationTLS struct {
+	SecretName	   string			  `json:"secretName"`
+	IssuerName     string             `json:"issuerName"`
+	IssuerKind     string             `json:"issuerKind"`
+}
+
+type KafkaUserAuthorization struct {
+
+
 }
 
 // KafkaUserStatus defines the observed state of KafkaUser
