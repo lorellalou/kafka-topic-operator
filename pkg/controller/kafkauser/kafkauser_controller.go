@@ -15,6 +15,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	
 	sarama "github.com/Shopify/sarama"
 	
@@ -107,15 +108,31 @@ func (r *ReconcileKafkaUser) Reconcile(request reconcile.Request) (reconcile.Res
 	}
 
 	// Check if this Certificate already exists
-	r.cmClient.CertmanagerV1alpha1().Certificates(request.Namespace).Get(request.Name)
-	entries, err := r.kafka.KafkaAdmin.DescribeConfig(resource)
-	if err != nil {
+	cert, err := r.cmClient.CertmanagerV1alpha1().Certificates(instance.Namespace).Get(
+		instance.Spec.Authentication.TLS.SecretName, metav1.GetOptions{})
+	if err == nil {
+		return reconcile.Result{}, err
+	} else if k8sErrors.IsNotFound(err) {
+		certificate := &cmv1alpha1.Certificate{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace: instance.Namespace,
+				Name:      instance.Spec.Authentication.TLS.SecretName,
+			},
+			Spec: cmv1alpha1.CertificateSpec{
+				CommonName: instance.Name,
+				SecretName: instance.Spec.Authentication.TLS.SecretName,
+				KeyAlgorithm: cmv1alpha1.RSAKeyAlgorithm,
+				KeySize: 2048,			
+				IssuerRef: cmv1alpha1.ObjectReference{
+					Name: instance.Spec.Authentication.TLS.IssuerName,
+					Kind: instance.Spec.Authentication.TLS.IssuerKind,
+				},
+			},
+		}		
+		r.cmClient.CertmanagerV1alpha1().Certificates(instance.Namespace).Create(certificate)
+	} else {
 		return reconcile.Result{}, err
 	}
-
-	// Set KafkaUser instance as the owner and controller
-	if err := controllerutil.SetControllerReference(instance, pod, r.scheme); err != nil {
-		return reconcile.Result{}, err
 	}
 
 
@@ -123,25 +140,3 @@ func (r *ReconcileKafkaUser) Reconcile(request reconcile.Request) (reconcile.Res
 	return reconcile.Result{}, nil
 }
 
-// newPodForCR returns a busybox pod with the same name/namespace as the cr
-func newPodForCR(cr *kafkav1alpha1.KafkaUser) *corev1.Pod {
-	labels := map[string]string{
-		"app": cr.Name,
-	}
-	return &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      cr.Name + "-pod",
-			Namespace: cr.Namespace,
-			Labels:    labels,
-		},
-		Spec: corev1.PodSpec{
-			Containers: []corev1.Container{
-				{
-					Name:    "busybox",
-					Image:   "busybox",
-					Command: []string{"sleep", "3600"},
-				},
-			},
-		},
-	}
-}

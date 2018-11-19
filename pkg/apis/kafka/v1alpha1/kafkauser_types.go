@@ -10,7 +10,7 @@ import (
 // KafkaUserSpec defines the desired state of KafkaUser
 type KafkaUserSpec struct {
 	Authentication   KafkaUserAuthentication   `json:"authentication"`
-	Authorization    KafkaUserAuthorization    `json:"authorization"`
+//	Authorization    KafkaUserAuthorization    `json:"authorization"`
 }
 
 type KafkaUserAuthentication struct {
