@@ -137,7 +137,7 @@ func (r *ReconcileKafkaUser) Reconcile(request reconcile.Request) (reconcile.Res
 		instance.Spec.Authentication.TLS.SecretName, metav1.GetOptions{})
 	if err == nil {
 		r.cmClient.CertmanagerV1alpha1().Certificates(request.Namespace).Delete(instance.Spec.Authentication.TLS.SecretName, &metav1.DeleteOptions{})
-		clientset.CoreV1().Secrets(request.Namespace).Delete(instance.Spec.Authentication.TLS.SecretName, &metav1.DeleteOptions{})
+		r.client clientset.CoreV1().Secrets(request.Namespace).Delete(instance.Spec.Authentication.TLS.SecretName, &metav1.DeleteOptions{})
 	}
 	if err == nil || k8sErrors.IsNotFound(err) {
 		log.Printf("Creating a new User Certificate %s/%s\n", request.Namespace, instance.Spec.Authentication.TLS.SecretName)	
