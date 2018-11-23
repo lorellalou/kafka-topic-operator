@@ -314,6 +314,14 @@
   revision = "ab09a3d17d9b0fb24583639721bc5694dc5c1cfa"
 
 [[projects]]
+  digest = "1:29abff5898d8bec334be147b83d62d33796a5838e1d320e6a97605327fd76281"
+  name = "github.com/pavel-v-chernykh/keystore-go"
+  packages = ["."]
+  pruneopts = "NT"
+  revision = "7bbcda7e585ed7a01e8610f6e19dde5bc2c1f6d0"
+  version = "v2.1.0"
+
+[[projects]]
   digest = "1:93b1d84c5fa6d1ea52f4114c37714cddd84d5b78f151b62bb101128dd51399bf"
   name = "github.com/pborman/uuid"
   packages = ["."]
@@ -758,6 +766,7 @@
     "pkg/client/apiutil",
     "pkg/client/config",
     "pkg/controller",
+    "pkg/controller/controllerutil",
     "pkg/event",
     "pkg/handler",
     "pkg/internal/controller",
@@ -790,10 +799,13 @@
     "github.com/jetstack/cert-manager/pkg/apis/certmanager/v1alpha1",
     "github.com/jetstack/cert-manager/pkg/client/clientset/versioned",
     "github.com/operator-framework/operator-sdk/version",
+    "github.com/pavel-v-chernykh/keystore-go",
+    "k8s.io/api/core/v1",
     "k8s.io/apimachinery/pkg/api/errors",
     "k8s.io/apimachinery/pkg/apis/meta/v1",
     "k8s.io/apimachinery/pkg/runtime",
     "k8s.io/apimachinery/pkg/runtime/schema",
+    "k8s.io/apimachinery/pkg/types",
     "k8s.io/client-go/plugin/pkg/client/auth/gcp",
     "k8s.io/code-generator/cmd/client-gen",
     "k8s.io/code-generator/cmd/conversion-gen",
@@ -806,6 +818,7 @@
     "sigs.k8s.io/controller-runtime/pkg/client",
     "sigs.k8s.io/controller-runtime/pkg/client/config",
     "sigs.k8s.io/controller-runtime/pkg/controller",
+    "sigs.k8s.io/controller-runtime/pkg/controller/controllerutil",
     "sigs.k8s.io/controller-runtime/pkg/handler",
     "sigs.k8s.io/controller-runtime/pkg/manager",
     "sigs.k8s.io/controller-runtime/pkg/reconcile",

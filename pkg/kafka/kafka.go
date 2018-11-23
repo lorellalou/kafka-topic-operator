@@ -14,6 +14,7 @@ import (
 
 type KafkaUtil struct {
 	KafkaAdmin sarama.ClusterAdmin
+	CACertificates *x509.CertPool
 }
 
 func New() (*KafkaUtil, error) {
@@ -43,6 +44,7 @@ func New() (*KafkaUtil, error) {
 	
 	k := &KafkaUtil{
 		KafkaAdmin: kafka,
+		CACertificates: tlsConfig.RootCAs,
 	}
 	
 	return k, nil

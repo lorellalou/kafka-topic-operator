@@ -3,14 +3,20 @@ package kafkauser
 import (
 	"context"
 	"log"
+	"fmt"
 	"time"
 	"bytes"
 	"bufio"
+	"encoding/pem"
+	"math/rand"
+	"crypto/x509"	
 
 	kafkav1alpha1 "github.com/lrolaz/kafka-topic-operator/pkg/apis/kafka/v1alpha1"
 	kafka "github.com/lrolaz/kafka-topic-operator/pkg/kafka"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -20,11 +26,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/source"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8sErrors "k8s.io/apimachinery/pkg/api/errors"
+
 		
 	//sarama "github.com/Shopify/sarama"
 	
 	cmv1alpha1 "github.com/jetstack/cert-manager/pkg/apis/certmanager/v1alpha1"
-	cmclientset "github.com/jetstack/cert-manager/pkg/client/clientset/versioned"	
+	
+	"github.com/pavel-v-chernykh/keystore-go"
 )
 
 /**
@@ -40,20 +48,20 @@ func Add(mgr manager.Manager) error {
 		return err
 	}
 	log.Printf("Kafka Broker connected\n")
-	cmClientSet, err := cmclientset.NewForConfig(mgr.GetConfig())
-    if err != nil {
-		return err
-    }	
-	return add(mgr, newReconciler(mgr, kafka, cmClientSet))
+	//cmClientSet, err := cmclientset.NewForConfig(mgr.GetConfig())
+    //if err != nil {
+	//	return err
+    //}	
+	return add(mgr, newReconciler(mgr, kafka))
 }
 
 // newReconciler returns a new reconcile.Reconciler
-func newReconciler(mgr manager.Manager, kafka *kafka.KafkaUtil, cmClientSet *cmclientset.Clientset) reconcile.Reconciler {
+func newReconciler(mgr manager.Manager, kafka *kafka.KafkaUtil) reconcile.Reconciler {
 	return &ReconcileKafkaUser{
 		client: mgr.GetClient(), 
 		scheme: mgr.GetScheme(),
 		kafka: kafka,
-		cmClient: cmClientSet,
+		//cmClient: cmClientSet,
 	}
 }
 
@@ -83,8 +91,8 @@ type ReconcileKafkaUser struct {
 	// that reads objects from the cache and writes to the apiserver
 	client client.Client
 	scheme *runtime.Scheme
-	kafka *kafka.KafkaUtil	
-	cmClient *cmclientset.Clientset	
+	kafka *kafka.KafkaUtil
+	//cmClient *cmclientset.Clientset	
 }
 
 // Reconcile reads that state of the cluster for a KafkaUser object and makes changes based on the state read
@@ -133,15 +141,27 @@ func (r *ReconcileKafkaUser) Reconcile(request reconcile.Request) (reconcile.Res
 	controllerutil.SetControllerReference(instance, certificate, r.scheme)
 
 	// Check if this Certificate already exists
-	cert, err := r.cmClient.CertmanagerV1alpha1().Certificates(instance.Namespace).Get(
-		instance.Spec.Authentication.TLS.SecretName, metav1.GetOptions{})
+	existingCert := &cmv1alpha1.Certificate{}
+	err = r.client.Get(context.TODO(), 
+		types.NamespacedName{
+			Name: instance.Spec.Authentication.TLS.SecretName, 
+			Namespace: instance.Namespace,
+		}, existingCert)
 	if err == nil {
-		r.cmClient.CertmanagerV1alpha1().Certificates(request.Namespace).Delete(instance.Spec.Authentication.TLS.SecretName, &metav1.DeleteOptions{})
-		r.client clientset.CoreV1().Secrets(request.Namespace).Delete(instance.Spec.Authentication.TLS.SecretName, &metav1.DeleteOptions{})
+		r.client.Delete(context.TODO(), existingCert)
+		existingSecret := &corev1.Secret{}
+		err = r.client.Get(context.TODO(), 
+			types.NamespacedName{
+				Name: instance.Spec.Authentication.TLS.SecretName, 
+				Namespace: instance.Namespace,
+			}, existingSecret)
+		if err != nil {
+			r.client.Delete(context.TODO(), existingSecret)
+		}
 	}
 	if err == nil || k8sErrors.IsNotFound(err) {
 		log.Printf("Creating a new User Certificate %s/%s\n", request.Namespace, instance.Spec.Authentication.TLS.SecretName)	
-		_,err = r.cmClient.CertmanagerV1alpha1().Certificates(instance.Namespace).Create(certificate)
+		err = r.client.Create(context.TODO(), certificate)
 		if err != nil {
 			log.Printf("%s\n", err)
 			return reconcile.Result{Requeue: true, RequeueAfter: time.Duration(30)}, err
@@ -151,16 +171,16 @@ func (r *ReconcileKafkaUser) Reconcile(request reconcile.Request) (reconcile.Res
 		return reconcile.Result{Requeue: true, RequeueAfter: time.Duration(30)}, err
 	}
 	
-	log.Printf("Successfully created Certificate %s", secretName)
+	log.Printf("Successfully created Certificate %s", instance.Spec.Authentication.TLS.SecretName)
 
 	log.Println("waiting for secret...")
+	secret := &corev1.Secret{}
 	for {
-		found := &appsv1.Secret{}
 		err = r.client.Get(context.TODO(), 
 			types.NamespacedName{
 				Name: instance.Spec.Authentication.TLS.SecretName, 
 				Namespace: instance.Namespace,
-			}, found)
+			}, secret)
 		if err != nil {
 			log.Printf("unable to retrieve certificate secret (%s): %s", instance.Spec.Authentication.TLS.SecretName, err)
 			time.Sleep(5 * time.Second)
@@ -170,7 +190,7 @@ func (r *ReconcileKafkaUser) Reconcile(request reconcile.Request) (reconcile.Res
 	}
 	log.Printf("Successfully rerieved certificate secret %s", instance.Spec.Authentication.TLS.SecretName)
 	
-	keyStore, trustStore, err := r.createJavaKeystore(certificate, namespace, caSecretName)
+	keyStore, trustStore, err := r.createJavaKeystore(certificate)
 	if err != nil {
 		log.Fatalf("unable to create the java keystore (%s): %s", certificate.Name, err)
 	}
@@ -182,27 +202,26 @@ func (r *ReconcileKafkaUser) Reconcile(request reconcile.Request) (reconcile.Res
     }
 
 	// Write Keystore
-	var b bytes.Buffer
-	var writer bufio.Writer
-    writer = bufio.NewWriter(&b)
+	var buffer bytes.Buffer
+	var writer *bufio.Writer
+    writer = bufio.NewWriter(&buffer)
 	err = keystore.Encode(writer, *keyStore, password)
 	if err != nil {
 		log.Fatalf("unable to create or update the java keystore (%s): %s", "keystore.jks", err)
 	}
 	writer.Flush()
-	secret.Data["keystore.jks"] = b.Bytes()
+	secret.Data["keystore.jks"] = buffer.Bytes()
 	secret.Data["keystore.password"] = password
 	writer.Close()
 	buffer.Reset()	
 	
 	// Write Truststore
-	truststoreFile := path.Join(keystoreDir, fmt.Sprintf("truststore.jks"))
-    writer = bufio.NewWriter(&b)
+    writer = bufio.NewWriter(&buffer)
 	err = keystore.Encode(writer, *trustStore, password)
 	if err != nil {
 		log.Fatalf("unable to create or update the java keystore (%s): %s", "truststore.jks", err)
 	}
-	secret.Data["truststore.jks"] = b.Bytes()
+	secret.Data["truststore.jks"] = buffer.Bytes()
 	secret.Data["truststore.password"] = password
 	writer.Close()
 	buffer.Reset()	
@@ -213,34 +232,33 @@ func (r *ReconcileKafkaUser) Reconcile(request reconcile.Request) (reconcile.Res
 	return reconcile.Result{}, nil
 }
 
-func (r *ReconcileKafkaUser) createJavaKeystore(crt *cmv1alpha1.Certificate, namespace string, caSecretName string) (*keystore.KeyStore, *keystore.KeyStore, error) {
+func (r *ReconcileKafkaUser) createJavaKeystore(crt *cmv1alpha1.Certificate) (*keystore.KeyStore, *keystore.KeyStore, error) {
 	
-	secret := &appsv1.Secret{}
+	secret := &corev1.Secret{}
 	err = r.client.Get(context.TODO(), 
 		types.NamespacedName{
-			Name: instance.Spec.Authentication.TLS.SecretName, 
-			Namespace: instance.Namespace,
-		}, found)
-	if err != nil {
-		return nil, nil, err
-	}
-		
-	caSecret := &appsv1.Secret{}
-	err = r.client.Get(context.TODO(), 
-		types.NamespacedName{
-			Name: caSecretName, 
-			Namespace: namespace,
+			Name: crt.Spec.SecretName, 
+			Namespace: crt.Namespace,
 		}, found)
 	if err != nil {
 		return nil, nil, err
 	}		
-		
-	caSecret, err := clientset.CoreV1().Secrets(namespace).Get(caSecretName, metav1.GetOptions{})
-	if err != nil {
-		return nil, nil, err
-	}		
 	
-	caBlock, _ := pem.Decode(caSecret.Data[v1.TLSCertKey])
+	var trustedCertificates []keystore.Certificate
+	for i, trustedCert := range r.kafka.CACertificates.certs {
+		trustedCertificates = append(trustedCertificates, 
+			keystore.TrustedCertificateEntry{
+				Entry: keystore.Entry{
+					CreationDate: time.Now(),
+				},
+				Certificate: keystore.Certificate{
+					Type: "X509",
+					Content: trustedCert.Raw,	
+				},
+	        },
+		)
+	}	
+		
 		
 	pcks1KeyBlock, _ := pem.Decode(secret.Data[v1.TLSPrivateKeyKey])
 	pkcs1Key, err := x509.ParsePKCS1PrivateKey(pcks1KeyBlock.Bytes)
@@ -269,15 +287,6 @@ func (r *ReconcileKafkaUser) createJavaKeystore(crt *cmv1alpha1.Certificate, nam
 	}		
 		
 	keyStore := keystore.KeyStore{
-		"ca": &keystore.TrustedCertificateEntry{
-			Entry: keystore.Entry{
-				CreationDate: time.Now(),
-			},
-			Certificate: keystore.Certificate{
-				Type: "X509",
-				Content: caBlock.Bytes,	
-			},
-		},	
 		secretName: &keystore.PrivateKeyEntry{
 			Entry: keystore.Entry{
 				CreationDate: time.Now(),
@@ -287,16 +296,14 @@ func (r *ReconcileKafkaUser) createJavaKeystore(crt *cmv1alpha1.Certificate, nam
 		},
 	}
 
-	trustStore := keystore.KeyStore{
-		"ca": &keystore.TrustedCertificateEntry{
-			Entry: keystore.Entry{
-				CreationDate: time.Now(),
-			},
-			Certificate: keystore.Certificate{
-				Type: "X509",
-				Content: caBlock.Bytes,	
-			},
-		},
+	for i, trustedCertif := range trustedCertificates {
+		keyStore[fmt.Sprintf("trusted-%d", i)] = trustedCertif
+	}
+
+	trustStore := keystore.KeyStore{}
+
+	for i, trustedCertif := range trustedCertificates {
+		trustStore[fmt.Sprintf("trusted-%d", i)] = trustedCertif
 	}
 
 	for i, cert := range certificates {
