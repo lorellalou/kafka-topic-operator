@@ -192,8 +192,10 @@ func (r *ReconcileKafkaUser) Reconcile(request reconcile.Request) (reconcile.Res
 	
 	keyStore, trustStore, err := r.createJavaKeystore(certificate)
 	if err != nil {
-		log.Fatalf("unable to create the java keystore (%s): %s", certificate.Name, err)
+		log.Printf("unable to create the java keystore (%s): %s", certificate.Name, err)
+		return reconcile.Result{Requeue: true, RequeueAfter: time.Duration(30)}, err
 	}
+	log.Printf("Successfully created the java keystore (%s)", certificate.Name)
 	// generate random password
 	const letterBytes = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
 	password := make([]byte, 10)
@@ -207,27 +209,32 @@ func (r *ReconcileKafkaUser) Reconcile(request reconcile.Request) (reconcile.Res
     writer = bufio.NewWriter(&buffer)
 	err = keystore.Encode(writer, *keyStore, password)
 	if err != nil {
-		log.Fatalf("unable to create or update the java keystore (%s): %s", "keystore.jks", err)
+		log.Printf("unable to create or update the java keystore (%s): %s", "keystore.jks", err)
+		return reconcile.Result{Requeue: true, RequeueAfter: time.Duration(30)}, err
 	}
 	writer.Flush()
 	secret.Data["keystore.jks"] = buffer.Bytes()
 	secret.Data["keystore.password"] = password
-	writer.Close()
 	buffer.Reset()	
 	
 	// Write Truststore
     writer = bufio.NewWriter(&buffer)
 	err = keystore.Encode(writer, *trustStore, password)
 	if err != nil {
-		log.Fatalf("unable to create or update the java keystore (%s): %s", "truststore.jks", err)
+		log.Printf("unable to create or update the java keystore (%s): %s", "truststore.jks", err)
+		return reconcile.Result{Requeue: true, RequeueAfter: time.Duration(30)}, err
 	}
+	writer.Flush()
 	secret.Data["truststore.jks"] = buffer.Bytes()
 	secret.Data["truststore.password"] = password
-	writer.Close()
 	buffer.Reset()	
 	
 	// save Secret
-	
+	err = r.client.Update(context.TODO(), secret)
+	if err != nil {
+		log.Printf("Unable to update the certificate secret: %s", err)
+		return reconcile.Result{Requeue: true, RequeueAfter: time.Duration(30)}, err
+	}	
 	//  don't requeue
 	return reconcile.Result{}, nil
 }
@@ -235,17 +242,17 @@ func (r *ReconcileKafkaUser) Reconcile(request reconcile.Request) (reconcile.Res
 func (r *ReconcileKafkaUser) createJavaKeystore(crt *cmv1alpha1.Certificate) (*keystore.KeyStore, *keystore.KeyStore, error) {
 	
 	secret := &corev1.Secret{}
-	err = r.client.Get(context.TODO(), 
+	err := r.client.Get(context.TODO(), 
 		types.NamespacedName{
 			Name: crt.Spec.SecretName, 
 			Namespace: crt.Namespace,
-		}, found)
+		}, secret)
 	if err != nil {
 		return nil, nil, err
 	}		
 	
-	var trustedCertificates []keystore.Certificate
-	for i, trustedCert := range r.kafka.CACertificates.certs {
+	trustedCertificates := make([]keystore.TrustedCertificateEntry,0)
+	for _, trustedCert := range r.kafka.CACertificates {
 		trustedCertificates = append(trustedCertificates, 
 			keystore.TrustedCertificateEntry{
 				Entry: keystore.Entry{
@@ -260,24 +267,26 @@ func (r *ReconcileKafkaUser) createJavaKeystore(crt *cmv1alpha1.Certificate) (*k
 	}	
 		
 		
-	pcks1KeyBlock, _ := pem.Decode(secret.Data[v1.TLSPrivateKeyKey])
+	pcks1KeyBlock, _ := pem.Decode(secret.Data[corev1.TLSPrivateKeyKey])
 	pkcs1Key, err := x509.ParsePKCS1PrivateKey(pcks1KeyBlock.Bytes)
 	if err != nil {
-		log.Fatal("error parsing rsa private key", err)
+		log.Printf("error parsing rsa private key: %s", err)
+		return nil, nil, err
 	}
 	pkcs8Key, err := x509.MarshalPKCS8PrivateKey(pkcs1Key)
 	if err != nil {
-		log.Fatal("error converting private key to PKCS8", err)
+		log.Printf("error converting private key to PKCS8: %s", err)
+		return nil, nil, err
 	}		
 		
 	var certificates []keystore.Certificate
-	var buf []byte = secret.Data[v1.TLSCertKey]
+	var buf []byte = secret.Data[corev1.TLSCertKey]
 	var block *pem.Block
 	// loop over pem encoded data
 	for len(buf) > 0 {
 		block, buf = pem.Decode(buf)
 		if block == nil {
-			log.Fatal("invalid PEM data")
+			log.Printf("invalid PEM data")
 		}
 		certificates = append(certificates, 
 			keystore.Certificate{
@@ -287,7 +296,7 @@ func (r *ReconcileKafkaUser) createJavaKeystore(crt *cmv1alpha1.Certificate) (*k
 	}		
 		
 	keyStore := keystore.KeyStore{
-		secretName: &keystore.PrivateKeyEntry{
+		crt.Spec.SecretName: &keystore.PrivateKeyEntry{
 			Entry: keystore.Entry{
 				CreationDate: time.Now(),
 			},
@@ -297,13 +306,13 @@ func (r *ReconcileKafkaUser) createJavaKeystore(crt *cmv1alpha1.Certificate) (*k
 	}
 
 	for i, trustedCertif := range trustedCertificates {
-		keyStore[fmt.Sprintf("trusted-%d", i)] = trustedCertif
+		keyStore[fmt.Sprintf("trusted-%d", i)] = &trustedCertif
 	}
 
 	trustStore := keystore.KeyStore{}
 
 	for i, trustedCertif := range trustedCertificates {
-		trustStore[fmt.Sprintf("trusted-%d", i)] = trustedCertif
+		trustStore[fmt.Sprintf("trusted-%d", i)] = &trustedCertif
 	}
 
 	for i, cert := range certificates {
