@@ -65,7 +65,6 @@ func createTlsConfiguration(certFile string, keyFile string, caFile string) (t *
 		if err != nil {
 			return nil, nil, err
 		}
-		cacert := make([]*x509.Certificate,1)
 		for len(caCert) > 0 {
 			var block *pem.Block
 			block, caCert = pem.Decode(caCert)
@@ -82,13 +81,36 @@ func createTlsConfiguration(certFile string, keyFile string, caFile string) (t *
 			}
 	
 			cacert = append(cacert, cert)
+			log.Printf("Add CA Cert %s (%s)\n", cert.Subject.CommonName, cert.SerialNumber)
+		}
+		intermediateCert, err := ioutil.ReadFile(certFile)
+		if err != nil {
+			return nil, nil, err
+		}
+		for len(intermediateCert) > 0 {
+			var block *pem.Block
+			block, intermediateCert = pem.Decode(intermediateCert)
+			if block == nil {
+				break
+			}
+			if block.Type != "CERTIFICATE" || len(block.Headers) != 0 {
+				continue
+			}
+	
+			cert, err := x509.ParseCertificate(block.Bytes)
+			if err != nil {
+				continue
+			}
+	
+			cacert = append(cacert, cert)
+			log.Printf("Add CA Cert %s (%s)\n", cert.Subject.CommonName, cert.SerialNumber)
 		}
 
 		caCert, err = ioutil.ReadFile(caFile)
 		if err != nil {
 			return nil, nil, err
 		}
-		intermediateCert, err := ioutil.ReadFile(certFile)
+		intermediateCert, err = ioutil.ReadFile(certFile)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -100,7 +122,7 @@ func createTlsConfiguration(certFile string, keyFile string, caFile string) (t *
 			Certificates:       []tls.Certificate{cert},
 			RootCAs:            caCertPool,
 			CipherSuites:       []uint16{tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384},
-			InsecureSkipVerify:	true,
+//			InsecureSkipVerify:	true,
 			ClientAuth:			tls.RequireAndVerifyClientCert,
 			
 		}

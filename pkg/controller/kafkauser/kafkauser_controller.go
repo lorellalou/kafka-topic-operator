@@ -172,7 +172,7 @@ func (r *ReconcileKafkaUser) Reconcile(request reconcile.Request) (reconcile.Res
 	}
 	
 	log.Printf("Successfully created Certificate %s", instance.Spec.Authentication.TLS.SecretName)
-
+	
 	log.Println("waiting for secret...")
 	secret := &corev1.Secret{}
 	for {
@@ -189,6 +189,7 @@ func (r *ReconcileKafkaUser) Reconcile(request reconcile.Request) (reconcile.Res
 		break
 	}
 	log.Printf("Successfully rerieved certificate secret %s", instance.Spec.Authentication.TLS.SecretName)
+	controllerutil.SetControllerReference(instance, secret, r.scheme)
 	
 	keyStore, trustStore, err := r.createJavaKeystore(certificate)
 	if err != nil {
@@ -204,30 +205,29 @@ func (r *ReconcileKafkaUser) Reconcile(request reconcile.Request) (reconcile.Res
     }
 
 	// Write Keystore
-	var buffer bytes.Buffer
+	var bufferKeystore bytes.Buffer
 	var writer *bufio.Writer
-    writer = bufio.NewWriter(&buffer)
+    writer = bufio.NewWriter(&bufferKeystore)
 	err = keystore.Encode(writer, *keyStore, password)
 	if err != nil {
 		log.Printf("unable to create or update the java keystore (%s): %s", "keystore.jks", err)
 		return reconcile.Result{Requeue: true, RequeueAfter: time.Duration(30)}, err
 	}
 	writer.Flush()
-	secret.Data["keystore.jks"] = buffer.Bytes()
+	secret.Data["keystore.jks"] = bufferKeystore.Bytes()
 	secret.Data["keystore.password"] = password
-	buffer.Reset()	
 	
 	// Write Truststore
-    writer = bufio.NewWriter(&buffer)
+	var bufferTruststore bytes.Buffer	
+    writer = bufio.NewWriter(&bufferTruststore)
 	err = keystore.Encode(writer, *trustStore, password)
 	if err != nil {
 		log.Printf("unable to create or update the java keystore (%s): %s", "truststore.jks", err)
 		return reconcile.Result{Requeue: true, RequeueAfter: time.Duration(30)}, err
 	}
 	writer.Flush()
-	secret.Data["truststore.jks"] = buffer.Bytes()
+	secret.Data["truststore.jks"] = bufferTruststore.Bytes()
 	secret.Data["truststore.password"] = password
-	buffer.Reset()	
 	
 	// save Secret
 	err = r.client.Update(context.TODO(), secret)
@@ -251,10 +251,10 @@ func (r *ReconcileKafkaUser) createJavaKeystore(crt *cmv1alpha1.Certificate) (*k
 		return nil, nil, err
 	}		
 	
-	trustedCertificates := make([]keystore.TrustedCertificateEntry,0)
+	var trustedCertificates []*keystore.TrustedCertificateEntry
 	for _, trustedCert := range r.kafka.CACertificates {
 		trustedCertificates = append(trustedCertificates, 
-			keystore.TrustedCertificateEntry{
+			&keystore.TrustedCertificateEntry{
 				Entry: keystore.Entry{
 					CreationDate: time.Now(),
 				},
@@ -273,11 +273,13 @@ func (r *ReconcileKafkaUser) createJavaKeystore(crt *cmv1alpha1.Certificate) (*k
 		log.Printf("error parsing rsa private key: %s", err)
 		return nil, nil, err
 	}
+	log.Printf("Successfully parsing PKCS1 Key %s", err)
 	pkcs8Key, err := x509.MarshalPKCS8PrivateKey(pkcs1Key)
 	if err != nil {
 		log.Printf("error converting private key to PKCS8: %s", err)
 		return nil, nil, err
 	}		
+	log.Printf("Successfully marshalling PKCS8 Key %s", err)
 		
 	var certificates []keystore.Certificate
 	var buf []byte = secret.Data[corev1.TLSCertKey]
@@ -293,6 +295,7 @@ func (r *ReconcileKafkaUser) createJavaKeystore(crt *cmv1alpha1.Certificate) (*k
 				Type: "X509",
 				Content: block.Bytes,	
 			})
+		log.Printf("Found Certificate for Secret %s ", crt.Spec.SecretName)
 	}		
 		
 	keyStore := keystore.KeyStore{
@@ -306,13 +309,15 @@ func (r *ReconcileKafkaUser) createJavaKeystore(crt *cmv1alpha1.Certificate) (*k
 	}
 
 	for i, trustedCertif := range trustedCertificates {
-		keyStore[fmt.Sprintf("trusted-%d", i)] = &trustedCertif
+		keyStore[fmt.Sprintf("trusted-%d", i)] = trustedCertif
+		log.Printf("Add Trusted Certificate in keystore trusted-%d", i)
 	}
 
 	trustStore := keystore.KeyStore{}
 
 	for i, trustedCertif := range trustedCertificates {
-		trustStore[fmt.Sprintf("trusted-%d", i)] = &trustedCertif
+		trustStore[fmt.Sprintf("trusted-%d", i)] = trustedCertif
+		log.Printf("Add Trusted Certificate in truststore trusted-%d", i)
 	}
 
 	for i, cert := range certificates {
@@ -325,6 +330,7 @@ func (r *ReconcileKafkaUser) createJavaKeystore(crt *cmv1alpha1.Certificate) (*k
 			},
 			Certificate: cert,
         }
+        log.Printf("Add Trusted Certificate in truststore intermediate-%d", i)
     }
 
 	return &keyStore, &trustStore, nil
